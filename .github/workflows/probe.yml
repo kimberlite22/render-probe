@@ -1,0 +1,48 @@
+name: probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Machine
+        shell: pwsh
+        run: |
+          query session
+          whoami
+          Get-CimInstance Win32_VideoController | Format-List Name, VideoModeDescription, AdapterRAM
+          Get-CimInstance Win32_ComputerSystem | Format-List NumberOfLogicalProcessors, TotalPhysicalMemory, Model, Manufacturer
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          New-Item -ItemType Directory shots | Out-Null
+          ./shot.ps1 shots/0-desktop.png
+      - name: Install
+        shell: pwsh
+        run: |
+          Invoke-WebRequest 'https://www.roblox.com/download/client?os=win' -OutFile inst.exe -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+          (Get-Item inst.exe).Length
+          $p = Start-Process inst.exe -PassThru
+          $t = 0
+          while (-not (Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions\*\RobloxPlayerBeta.exe" -ErrorAction SilentlyContinue) -and $t -lt 240) { Start-Sleep 5; $t += 5 }
+          Start-Sleep 20
+          ./shot.ps1 shots/1-after-install.png
+          Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -Recurse -Filter RobloxPlayerBeta.exe | Select-Object FullName
+          Get-Process | Where-Object { $_.Name -like 'Roblox*' } | Format-Table Name, Id, WS, MainWindowTitle
+      - name: Launch
+        shell: pwsh
+        run: |
+          Get-Process | Where-Object { $_.Name -like 'Roblox*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+          $exe = (Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -Recurse -Filter RobloxPlayerBeta.exe | Select-Object -First 1).FullName
+          Start-Process $exe
+          foreach ($i in 1..6) {
+            Start-Sleep 15
+            ./shot.ps1 "shots/2-launch-$i.png"
+            Get-Process | Where-Object { $_.Name -like 'Roblox*' } | Format-Table Name, Id, @{n='MB';e={[int]($_.WS/1MB)}}, CPU, MainWindowTitle
+          }
+          Get-ChildItem "$env:LOCALAPPDATA\Roblox\logs" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 3 | ForEach-Object { Copy-Item $_.FullName shots/ }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots
+          path: shots
